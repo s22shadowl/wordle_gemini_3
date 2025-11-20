@@ -2,8 +2,8 @@ const CACHE_NAME = 'wordle-pro-v1';
 const ASSETS = [
     './',
     './index.html',
-    'https://raw.githubusercontent.com/gradyn/wordle-list/main/words',
-    'https://raw.githubusercontent.com/gradyn/wordle-list/main/allowed'
+    'https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/possible_words.txt',
+    'https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/allowed_words.txt'
 ];
 
 // 安裝 SW 並快取資源
