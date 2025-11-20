@@ -1,0 +1,20 @@
+{
+  "name": "Wordle Pro",
+  "short_name": "Wordle",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#121213",
+  "theme_color": "#121213",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/tabatkins/wordle-list/main/favicon_192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://raw.githubusercontent.com/tabatkins/wordle-list/main/favicon_512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

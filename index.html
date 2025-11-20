@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <!-- PWA 相關標籤 (搭配後續步驟) -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#121213">
+    <title>Wordle Pro (PWA+Daily)</title>
+    <style>
+        :root {
+            --color-correct: #6aaa64;
+            --color-present: #c9b458;
+            --color-absent: #787c7e;
+            --color-default: #121213;
+            --color-text: #ffffff;
+            --color-border: #3a3a3c;
+            --color-border-active: #565758;
+            --key-bg: #818384;
+            --modal-bg: #121213;
+            --modal-border: #1a1a1b;
+            --btn-primary: #538d4e;
+            --color-error-bg: rgba(0, 0, 0, 0.85);
+            --color-error-text: #ff4d4d;
+        }
+
+        body.high-contrast {
+            --color-correct: #f5793a;
+            --color-present: #85c0f9;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: var(--color-default);
+            color: var(--color-text);
+            font-family: 'Clear Sans', 'Helvetica Neue', Arial, sans-serif;
+            display: flex; flex-direction: column; align-items: center;
+            height: 100vh; overflow: hidden;
+        }
+
+        header {
+            border-bottom: 1px solid var(--color-border);
+            width: 100%; display: flex; align-items: center; justify-content: center;
+            position: relative; height: 50px; margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 24px; letter-spacing: 2px; font-weight: 700;
+            position: absolute; left: 50%; transform: translateX(-50%); margin: 0;
+            display: flex; align-items: center; gap: 5px;
+        }
+        
+        /* 模式標籤 (每日/無限) */
+        .mode-badge {
+            font-size: 10px; background: var(--color-border); padding: 2px 5px;
+            border-radius: 3px; vertical-align: middle; color: #ccc;
+        }
+
+        .header-icons { position: absolute; right: 10px; display: flex; gap: 10px; }
+        .icon-btn {
+            background: none; border: none; cursor: pointer;
+            color: var(--color-text); font-size: 24px; padding: 5px;
+        }
+
+        #loading-msg { font-size: 14px; color: #aaa; height: 20px; text-align: center; margin-bottom: 5px; }
+
+        #game-container {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: space-between; flex-grow: 1; width: 100%;
+            max-width: 500px; padding-bottom: 20px;
+        }
+
+        #board-container {
+            display: grid; grid-template-rows: repeat(6, 1fr); grid-gap: 5px;
+            width: 300px; height: 360px; margin-bottom: 10px;
+        }
+
+        .row { display: grid; grid-template-columns: repeat(5, 1fr); grid-gap: 5px; }
+
+        .tile {
+            width: 100%; height: 100%; border: 2px solid var(--color-border);
+            display: flex; justify-content: center; align-items: center;
+            font-size: 2rem; font-weight: bold; text-transform: uppercase; user-select: none;
+            transition: transform 0.5s, background-color 0.5s, border-color 0.5s;
+        }
+
+        .tile[data-state="active"] { border-color: var(--color-border-active); }
+        .tile[data-state="correct"] { background-color: var(--color-correct); border-color: var(--color-correct); }
+        .tile[data-state="present"] { background-color: var(--color-present); border-color: var(--color-present); }
+        .tile[data-state="absent"] { background-color: var(--color-absent); border-color: var(--color-absent); }
+
+        @keyframes flip { 0% { transform: rotateX(0); } 50% { transform: rotateX(90deg); } 100% { transform: rotateX(0); } }
+        @keyframes shake { 10%, 90% { transform: translateX(-1px); } 20%, 80% { transform: translateX(2px); } 30%, 50%, 70% { transform: translateX(-4px); } 40%, 60% { transform: translateX(4px); } }
+        .tile.flip { animation: flip 0.5s ease forwards; }
+        .row.shake { animation: shake 0.5s; }
+
+        #keyboard-container { width: 100%; padding: 0 8px; }
+        .keyboard-row { display: flex; justify-content: center; margin-bottom: 8px; touch-action: manipulation; }
+        
+        .key {
+            font-family: inherit; font-weight: bold; border: 0; border-radius: 4px;
+            cursor: pointer; background-color: var(--key-bg); color: white;
+            height: 58px; display: flex; justify-content: center; align-items: center;
+            text-transform: uppercase; margin: 0 3px; flex: 1; user-select: none;
+            font-size: 1.2rem; transition: background-color 0.1s;
+        }
+        .key:active, .key.active-push { background-color: #565758; transform: scale(0.95); }
+        .key-big { flex: 1.5; font-size: 12px; }
+
+        #message-container {
+            position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
+            z-index: 100; display: flex; flex-direction: column; gap: 10px;
+        }
+        .message {
+            background-color: white; color: black; padding: 10px 20px;
+            border-radius: 4px; font-weight: bold; opacity: 1;
+            transition: opacity 0.3s; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .message.fade-out { opacity: 0; }
+
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5); z-index: 200;
+            justify-content: center; align-items: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-content {
+            background-color: var(--modal-bg); border: 1px solid var(--modal-border);
+            padding: 20px; border-radius: 8px; width: 90%; max-width: 400px;
+            position: relative; box-shadow: 0 10px 25px rgba(0,0,0,0.5); color: var(--color-text);
+        }
+        .close-btn {
+            position: absolute; top: 10px; right: 15px; background: none;
+            border: none; color: var(--color-text); font-size: 24px; cursor: pointer;
+        }
+        .modal-title { text-align: center; margin-bottom: 20px; font-size: 1.2rem; font-weight: bold; }
+
+        .stats-container { display: flex; justify-content: space-around; margin-bottom: 20px; text-align: center; }
+        .stat-box { display: flex; flex-direction: column; }
+        .stat-val { font-size: 24px; font-weight: bold; }
+        .stat-label { font-size: 10px; color: #aaa; }
+
+        #share-btn {
+            background-color: var(--btn-primary); color: white; border: none;
+            padding: 10px 20px; font-size: 18px; font-weight: bold;
+            border-radius: 4px; cursor: pointer; width: 100%;
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+        }
+        
+        /* Toggle Switch */
+        .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--color-border); }
+        .setting-text h3 { font-size: 18px; margin-bottom: 2px; }
+        .setting-text p { font-size: 12px; color: #aaa; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--color-correct); }
+        input:checked + .slider:before { transform: translateX(26px); }
+
+        #error-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: var(--color-error-bg); z-index: 999;
+            flex-direction: column; justify-content: center; align-items: center; text-align: center;
+        }
+        #error-overlay.visible { display: flex; }
+        .error-content { background: #202020; padding: 30px; border-radius: 10px; border: 2px solid var(--color-border); }
+        .retry-btn { padding: 10px 20px; background-color: var(--btn-primary); color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <div id="error-overlay">
+        <div class="error-content">
+            <div style="font-size: 50px; margin-bottom: 20px;">⚠️</div>
+            <div style="color: var(--color-error-text); font-size: 24px; margin-bottom: 10px;">連線失敗</div>
+            <div style="color: #ccc;">無法下載字庫。<br>請檢查網路連線。</div>
+            <button class="retry-btn" onclick="location.reload()">重新整理</button>
+        </div>
+    </div>
+
+    <header>
+        <h1>WORDLE <span id="mode-badge" class="mode-badge">每日</span></h1>
+        <div class="header-icons">
+            <button class="icon-btn" id="stats-btn">📊</button>
+            <button class="icon-btn" id="settings-btn">⚙️</button>
+        </div>
+    </header>
+    
+    <div id="loading-msg">正在初始化...</div>
+    <div id="message-container"></div>
+
+    <div id="game-container">
+        <div id="board-container"></div>
+        <div id="keyboard-container"></div>
+    </div>
+
+    <!-- Stats Modal -->
+    <div id="stats-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal('stats-modal')">&times;</button>
+            <h2 class="modal-title">統計數據</h2>
+            <div class="stats-container">
+                <div class="stat-box"><span class="stat-val" id="stat-played">0</span><span class="stat-label">遊玩次數</span></div>
+                <div class="stat-box"><span class="stat-val" id="stat-win-pct">0</span><span class="stat-label">勝率 %</span></div>
+                <div class="stat-box"><span class="stat-val" id="stat-streak">0</span><span class="stat-label">當前連勝</span></div>
+                <div class="stat-box"><span class="stat-val" id="stat-max-streak">0</span><span class="stat-label">最大連勝</span></div>
+            </div>
+            <div id="share-section" style="display:none; border-top: 1px solid var(--color-border); padding-top: 20px;">
+                <button id="share-btn" onclick="shareResult()">分享結果 📋</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal('settings-modal')">&times;</button>
+            <h2 class="modal-title">設定</h2>
+            
+            <div class="setting-row">
+                <div class="setting-text">
+                    <h3>高對比模式</h3>
+                    <p>適合色盲人士 (橘/藍)</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="contrast-switch" onchange="toggleHighContrast(this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="setting-row">
+                <div class="setting-text">
+                    <h3>每日挑戰模式</h3>
+                    <p>每天一題 (關閉則為無限模式)</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="daily-switch" onchange="toggleDailyMode(this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div style="margin-top: 20px; font-size: 12px; color: #777; text-align: center;">
+                v2.0 (PWA Ready)
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const WORD_LENGTH = 5;
+        const MAX_ATTEMPTS = 6;
+        const URL_ANSWERS = "https://raw.githubusercontent.com/gradyn/wordle-list/main/words";
+        const URL_ALLOWED = "https://raw.githubusercontent.com/gradyn/wordle-list/main/allowed";
+
+        let answerList = [];
+        let validGuesses = new Set();
+        let targetEncoded = ""; // Base64 Encoded Target
+        let isGameReady = false;
+        let isFatalError = false;
+
+        let currentAttempt = 0;
+        let currentGuess = "";
+        let isGameOver = false;
+        let guesses = [];
+        let isDailyMode = true; // 預設每日模式
+
+        let stats = { played: 0, wins: 0, currentStreak: 0, maxStreak: 0 };
+
+        // Elements
+        const boardContainer = document.getElementById("board-container");
+        const keyboardContainer = document.getElementById("keyboard-container");
+        const messageContainer = document.getElementById("message-container");
+        const loadingMsg = document.getElementById("loading-msg");
+        const errorOverlay = document.getElementById("error-overlay");
+        const modeBadge = document.getElementById("mode-badge");
+
+        // --- PWA Registration ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').then(reg => {
+                    console.log('SW registered:', reg);
+                }).catch(err => console.log('SW fail:', err));
+            });
+        }
+
+        // --- Init ---
+        async function initGame() {
+            loadSettings();
+            initBoard();
+            initKeyboard();
+            await fetchGameData();
+            loadGameState(); // 載入時根據 isDailyMode 決定載入哪份存檔
+        }
+
+        async function fetchGameData() {
+            try {
+                const [resAnswers, resAllowed] = await Promise.all([fetch(URL_ANSWERS), fetch(URL_ALLOWED)]);
+                if (!resAnswers.ok || !resAllowed.ok) throw new Error("API Error");
+                const textAnswers = await resAnswers.text();
+                const textAllowed = await resAllowed.text();
+                answerList = textAnswers.split('\n').map(w => w.trim().toUpperCase()).filter(w => w.length === WORD_LENGTH);
+                const allowedList = textAllowed.split('\n').map(w => w.trim().toUpperCase()).filter(w => w.length === WORD_LENGTH);
+                validGuesses = new Set([...answerList, ...allowedList]);
+                if (answerList.length === 0) throw new Error("Empty List");
+                isGameReady = true;
+                loadingMsg.style.display = 'none';
+            } catch (error) {
+                console.error(error);
+                loadingMsg.innerText = "";
+                errorOverlay.classList.add("visible");
+                isFatalError = true;
+            }
+        }
+
+        // --- Logic: Daily vs Infinite ---
+
+        // 基於日期的隨機演算法 (Seeded Random)
+        function getDailyWordIndex() {
+            const dateStr = new Date().toISOString().split('T')[0]; // "2023-11-21"
+            let hash = 0;
+            for (let i = 0; i < dateStr.length; i++) {
+                hash = ((hash << 5) - hash) + dateStr.charCodeAt(i);
+                hash |= 0; 
+            }
+            return Math.abs(hash) % answerList.length;
+        }
+
+        function loadGameState() {
+            // 更新 UI 標籤
+            modeBadge.innerText = isDailyMode ? "每日" : "無限";
+            
+            // 載入統計
+            const savedStats = localStorage.getItem("wordleStats");
+            if (savedStats) stats = JSON.parse(savedStats);
+
+            // 決定 Key：每日模式用日期區分，無限模式用通用 Key
+            let storageKey = "wordleState_Infinite";
+            if (isDailyMode) {
+                const dateStr = new Date().toISOString().split('T')[0];
+                storageKey = `wordleState_Daily_${dateStr}`;
+            }
+
+            const savedState = localStorage.getItem(storageKey);
+            
+            // 重置介面
+            resetUI();
+
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                targetEncoded = state.targetEncoded; // 使用存檔中的目標 (避免中途換日)
+                guesses = state.guesses;
+                restoreBoard(state);
+            } else {
+                startNewGame();
+            }
+        }
+
+        function startNewGame() {
+            let word = "";
+            if (isDailyMode) {
+                word = answerList[getDailyWordIndex()];
+            } else {
+                word = answerList[Math.floor(Math.random() * answerList.length)];
+            }
+            
+            // Anti-Cheat: 編碼目標單字
+            targetEncoded = btoa(word);
+            
+            guesses = [];
+            currentAttempt = 0;
+            currentGuess = "";
+            isGameOver = false;
+            saveGameState("IN_PROGRESS");
+        }
+
+        function saveGameState(status) {
+            let storageKey = "wordleState_Infinite";
+            if (isDailyMode) {
+                const dateStr = new Date().toISOString().split('T')[0];
+                storageKey = `wordleState_Daily_${dateStr}`;
+            }
+
+            const state = {
+                targetEncoded: targetEncoded,
+                guesses: guesses,
+                status: status,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(storageKey, JSON.stringify(state));
+        }
+
+        function resetUI() {
+            currentAttempt = 0;
+            currentGuess = "";
+            isGameOver = false;
+            guesses = [];
+            document.querySelectorAll(".tile").forEach(t => {
+                t.innerText = ""; t.dataset.state = ""; t.classList.remove("flip");
+                t.style.backgroundColor = ""; t.style.borderColor = "";
+            });
+            document.querySelectorAll(".key").forEach(k => {
+                k.dataset.state = ""; k.style.backgroundColor = "";
+            });
+        }
+
+        function restoreBoard(state) {
+            if (state.status === "IN_PROGRESS" || state.status === "WIN" || state.status === "FAIL") {
+                state.guesses.forEach(g => {
+                    currentGuess = g;
+                    for(let i=0; i<g.length; i++) updateTile(i, g[i]);
+                    
+                    // 顯示顏色 (不播放動畫)
+                    const colors = getResultColors(g);
+                    const rowTiles = boardContainer.children[currentAttempt].children;
+                    g.split("").forEach((char, i) => {
+                        rowTiles[i].classList.add("flip");
+                        rowTiles[i].dataset.state = colors[i];
+                        // 防止動畫播放
+                        rowTiles[i].style.animation = 'none'; 
+                        rowTiles[i].offsetHeight; /* trigger reflow */
+                        rowTiles[i].style.animation = null; 
+                        updateKeyboardColor(char, colors[i]);
+                    });
+
+                    currentAttempt++;
+                    currentGuess = "";
+                });
+
+                if (state.status === "WIN" || state.status === "FAIL") {
+                    isGameOver = true;
+                    // 如果是剛載入就發現結束了，可以不彈視窗，或者選擇性彈出
+                }
+            }
+        }
+
+        // --- Game Logic ---
+
+        function initBoard() {
+            for (let i = 0; i < MAX_ATTEMPTS; i++) {
+                const row = document.createElement("div"); row.className = "row";
+                for (let j = 0; j < WORD_LENGTH; j++) {
+                    const tile = document.createElement("div"); tile.className = "tile"; tile.id = `tile-${i}-${j}`;
+                    row.appendChild(tile);
+                }
+                boardContainer.appendChild(row);
+            }
+        }
+
+        function initKeyboard() {
+            const keys = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+            keys.forEach((rowKeys, i) => {
+                const rowElement = document.createElement("div"); rowElement.className = "keyboard-row";
+                if (i === 2) {
+                    const enterKey = createKey("ENTER", "key-big"); enterKey.onclick = submitGuess; rowElement.appendChild(enterKey);
+                }
+                for (let char of rowKeys) {
+                    const key = createKey(char);
+                    key.onclick = () => { handleInput(char); key.classList.add("active-push"); setTimeout(() => key.classList.remove("active-push"), 100); };
+                    rowElement.appendChild(key);
+                }
+                if (i === 2) {
+                    const backKey = createKey("⌫", "key-big"); backKey.onclick = deleteLetter; rowElement.appendChild(backKey);
+                }
+                keyboardContainer.appendChild(rowElement);
+            });
+        }
+
+        function createKey(char, extraClass = "") {
+            const key = document.createElement("button"); key.innerText = char; key.className = `key ${extraClass}`; key.dataset.key = char; return key;
+        }
+
+        function handleInput(key) {
+            if (!isGameReady || isGameOver || isFatalError) return;
+            if (currentGuess.length < WORD_LENGTH) {
+                currentGuess += key; updateTile(currentGuess.length - 1, key);
+            }
+        }
+
+        function deleteLetter() {
+            if (!isGameReady || isGameOver || isFatalError) return;
+            if (currentGuess.length > 0) {
+                updateTile(currentGuess.length - 1, ""); currentGuess = currentGuess.slice(0, -1);
+            }
+        }
+
+        function updateTile(index, char) {
+            const tile = document.getElementById(`tile-${currentAttempt}-${index}`);
+            tile.innerText = char; tile.dataset.state = char ? "active" : "";
+            tile.style.borderColor = char ? "var(--color-border-active)" : "var(--color-border)";
+        }
+
+        function submitGuess() {
+            if (!isGameReady || isGameOver || isFatalError) return;
+            if (currentGuess.length !== WORD_LENGTH) { showMessage("字母數量不足"); shakeRow(); return; }
+            if (!validGuesses.has(currentGuess)) { showMessage("不在單字庫中"); shakeRow(); return; }
+
+            guesses.push(currentGuess);
+            saveGameState("IN_PROGRESS");
+            flipTiles();
+        }
+
+        function shakeRow() {
+            const row = boardContainer.children[currentAttempt];
+            row.classList.add("shake"); setTimeout(() => row.classList.remove("shake"), 500);
+        }
+
+        function getResultColors(guess) {
+            // Anti-Cheat: 解碼目標單字進行比對
+            const target = atob(targetEncoded);
+            const guessArray = guess.split("");
+            const targetArray = target.split("");
+            const result = new Array(WORD_LENGTH).fill("absent");
+            const targetCounts = {};
+
+            for (const char of targetArray) targetCounts[char] = (targetCounts[char] || 0) + 1;
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                if (guessArray[i] === targetArray[i]) {
+                    result[i] = "correct"; targetCounts[guessArray[i]]--;
+                }
+            }
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                if (result[i] === "correct") continue;
+                if (targetCounts[guessArray[i]] > 0) {
+                    result[i] = "present"; targetCounts[guessArray[i]]--;
+                }
+            }
+            return result;
+        }
+
+        function flipTiles() {
+            const rowTiles = boardContainer.children[currentAttempt].children;
+            const guessChars = currentGuess.split("");
+            const colors = getResultColors(currentGuess);
+            const target = atob(targetEncoded); // Decode for checking win
+
+            guessChars.forEach((char, i) => {
+                setTimeout(() => {
+                    const tile = rowTiles[i];
+                    tile.classList.add("flip");
+                    tile.dataset.state = colors[i];
+                    updateKeyboardColor(char, colors[i]);
+                    if (i === WORD_LENGTH - 1) checkWinLose(target);
+                }, i * 250);
+            });
+        }
+
+        function updateKeyboardColor(char, state) {
+            const key = document.querySelector(`.key[data-key='${char}']`);
+            if (!key) return;
+            const currentState = key.dataset.state;
+            if (currentState === "correct") return;
+            if (currentState === "present" && state === "absent") return;
+            key.dataset.state = state;
+            if (state === "correct") key.style.backgroundColor = "var(--color-correct)";
+            else if (state === "present") key.style.backgroundColor = "var(--color-present)";
+            else if (state === "absent") key.style.backgroundColor = "var(--color-absent)";
+        }
+
+        function checkWinLose(target) {
+            if (currentGuess === target) {
+                showMessage("恭喜獲勝！", 2000);
+                isGameOver = true;
+                updateStats(true);
+                saveGameState("WIN");
+                setTimeout(() => openStatsModal(), 2000);
+            } else {
+                currentAttempt++;
+                if (currentAttempt >= MAX_ATTEMPTS) {
+                    showMessage(target, 5000);
+                    isGameOver = true;
+                    updateStats(false);
+                    saveGameState("FAIL");
+                    setTimeout(() => openStatsModal(), 2500);
+                } else {
+                    currentGuess = "";
+                    saveGameState("IN_PROGRESS");
+                }
+            }
+        }
+
+        function updateStats(isWin) {
+            // 只有每日模式才計算統計，還是都計算？通常只算每日，但這裡簡單起見都算
+            stats.played++;
+            if (isWin) {
+                stats.wins++; stats.currentStreak++;
+                if (stats.currentStreak > stats.maxStreak) stats.maxStreak = stats.currentStreak;
+            } else {
+                stats.currentStreak = 0;
+            }
+            localStorage.setItem("wordleStats", JSON.stringify(stats));
+        }
+
+        function showMessage(msg, duration = 2000) {
+            const div = document.createElement("div"); div.className = "message"; div.innerText = msg;
+            messageContainer.appendChild(div);
+            setTimeout(() => {
+                div.classList.add("fade-out");
+                div.addEventListener("transitionend", () => div.remove());
+            }, duration);
+        }
+
+        // --- UI Modals ---
+        document.getElementById("stats-btn").onclick = openStatsModal;
+        document.getElementById("settings-btn").onclick = () => document.getElementById("settings-modal").classList.add("open");
+        function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+
+        function openStatsModal() {
+            document.getElementById("stat-played").innerText = stats.played;
+            const winPct = stats.played > 0 ? Math.round((stats.wins / stats.played) * 100) : 0;
+            document.getElementById("stat-win-pct").innerText = winPct;
+            document.getElementById("stat-streak").innerText = stats.currentStreak;
+            document.getElementById("stat-max-streak").innerText = stats.maxStreak;
+            document.getElementById("share-section").style.display = isGameOver ? "block" : "none";
+            document.getElementById("stats-modal").classList.add("open");
+        }
+
+        function shareResult() {
+            let resultString = `Wordle Pro ${isDailyMode ? '(每日)' : '(無限)'} ${guesses.length}/${MAX_ATTEMPTS}\n\n`;
+            guesses.forEach(g => {
+                const colors = getResultColors(g);
+                const line = colors.map(c => {
+                    if (c === "correct") return document.body.classList.contains("high-contrast") ? "🟧" : "🟩";
+                    if (c === "present") return document.body.classList.contains("high-contrast") ? "🟦" : "🟨";
+                    return "⬛";
+                }).join("");
+                resultString += line + "\n";
+            });
+            navigator.clipboard.writeText(resultString).then(() => showMessage("已複製結果")).catch(() => showMessage("複製失敗"));
+        }
+
+        // Settings
+        function loadSettings() {
+            const isHighContrast = localStorage.getItem("highContrast") === "true";
+            document.getElementById("contrast-switch").checked = isHighContrast;
+            toggleHighContrast(isHighContrast);
+
+            // Load Daily Mode setting (Default True)
+            const dailySetting = localStorage.getItem("isDailyMode");
+            isDailyMode = dailySetting === null ? true : (dailySetting === "true");
+            document.getElementById("daily-switch").checked = isDailyMode;
+        }
+
+        function toggleHighContrast(isChecked) {
+            if (isChecked) document.body.classList.add("high-contrast");
+            else document.body.classList.remove("high-contrast");
+            localStorage.setItem("highContrast", isChecked);
+            // Force repaint keys
+            document.querySelectorAll(".key").forEach(key => {
+                const state = key.dataset.state;
+                if(state === "correct") key.style.backgroundColor = "var(--color-correct)";
+                else if (state === "present") key.style.backgroundColor = "var(--color-present)";
+            });
+        }
+
+        function toggleDailyMode(isChecked) {
+            // 如果切換模式，需要重新載入遊戲狀態
+            if (isDailyMode !== isChecked) {
+                isDailyMode = isChecked;
+                localStorage.setItem("isDailyMode", isChecked);
+                loadGameState(); // Reload logic
+            }
+        }
+
+        // Inputs
+        document.addEventListener("keydown", (e) => {
+            if (isGameOver || isFatalError) return;
+            if (document.querySelector(".modal-overlay.open")) {
+                if (e.key === "Escape") document.querySelectorAll(".modal-overlay").forEach(m => m.classList.remove("open"));
+                return;
+            }
+            const keyChar = e.key.toUpperCase();
+            if (keyChar === "ENTER") submitGuess();
+            else if (keyChar === "BACKSPACE") deleteLetter();
+            else if (/^[A-Z]$/.test(keyChar)) {
+                handleInput(keyChar);
+                const k = document.querySelector(`.key[data-key='${keyChar}']`);
+                if(k){ k.classList.add("active-push"); setTimeout(() => k.classList.remove("active-push"), 100); }
+            }
+        });
+
+        // Run
+        initGame();
+    </script>
+</body>
+</html>
